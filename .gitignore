@@ -1,0 +1,20 @@
+# Databases (kept private, never committed)
+*.db
+*.db-shm
+*.db-wal
+*.db.gz
+
+# Data / output directories
+data/
+
+# Python
+__pycache__/
+*.pyc
+
+# Secrets / local config
+.env
+.venv/
+config/credentials/
+
+# Logs
+*.log

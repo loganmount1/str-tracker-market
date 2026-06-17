@@ -1,0 +1,143 @@
+name: Mt Hood Market Scrape
+
+# Two triggers:
+#   - Daily collection (every run): pulls calendars/details/pricing for known listings.
+#   - Weekly discovery (Mondays): also re-searches Airbnb to find NEW listings.
+# The weekly Monday run does BOTH discovery and collection; the daily runs only collect.
+on:
+  workflow_dispatch:
+    inputs:
+      run_discovery:
+        description: "Force a discovery pass on this manual run"
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 17 * * *'    # Daily collection — 17:00 UTC = 10:00 AM PDT
+    - cron: '0 16 * * 1'    # Weekly discovery — Mondays 16:00 UTC = 9:00 AM PDT
+
+permissions:
+  contents: read
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    steps:
+      - name: Checkout scraper repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ──────────────────────────────────────────────────────────────────
+      # Restore the database from the PRIVATE data repo.
+      # The DB is ~3 GB raw / ~370 MB gzipped — far over GitHub's 100 MB file
+      # limit — so it is NOT committed. It is stored as a RELEASE ASSET on a
+      # separate PRIVATE repo (release assets allow up to 2 GB and stay private
+      # on a private repo) and pulled in here via the gh CLI using a PAT secret.
+      # TODO: create private repo `loganmount1/str-tracker-data`, a fine-grained
+      #       PAT with Contents:read+write on it, and add it as secret DATA_REPO_PAT.
+      # ──────────────────────────────────────────────────────────────────
+      - name: Restore market_tracker.db from private data repo (release asset)
+        env:
+          GH_TOKEN: ${{ secrets.DATA_REPO_PAT }}
+        run: |
+          mkdir -p market data
+          if gh release download db-latest -R loganmount1/str-tracker-data -p 'market_tracker.db.gz' -D /tmp 2>/dev/null; then
+            gunzip -f /tmp/market_tracker.db.gz
+            mv /tmp/market_tracker.db market/market_tracker.db
+            echo "Restored DB: $(du -h market/market_tracker.db | cut -f1)"
+          else
+            echo "No existing DB release found — first run will create one via discovery + init_db."
+          fi
+
+      # ──────────────────────────────────────────────────────────────────
+      # Decide whether this run includes discovery.
+      # Discovery runs on the weekly Monday cron, or when manually forced.
+      # ──────────────────────────────────────────────────────────────────
+      - name: Determine run mode
+        id: mode
+        run: |
+          DISCOVER="false"
+          # Weekly discovery cron
+          if [ "${{ github.event.schedule }}" = "0 16 * * 1" ]; then
+            DISCOVER="true"
+          fi
+          # Manual override
+          if [ "${{ github.event.inputs.run_discovery }}" = "true" ]; then
+            DISCOVER="true"
+          fi
+          echo "discover=$DISCOVER" >> "$GITHUB_OUTPUT"
+          echo "Discovery this run: $DISCOVER"
+
+      # ── Discovery (weekly only) ──
+      - name: Discovery - search Airbnb for Mt Hood listings
+        if: steps.mode.outputs.discover == 'true'
+        run: |
+          # collect_market_data.py writes market snapshots into data/tracker.db,
+          # so make sure that dir exists. init_db seeds market/market_tracker.db
+          # from those discovered listings on first run; sync_new_listings adds
+          # any newly discovered listings on subsequent runs.
+          mkdir -p data
+          python collect_market_data.py
+          if [ ! -f market/market_tracker.db ]; then
+            python market/init_db.py
+          fi
+          python market/sync_new_listings.py
+        continue-on-error: true
+        timeout-minutes: 30
+
+      # ── Collection (every run) ──
+      - name: Collect calendars, details, reviews, pricing
+        run: python market/collect_all.py --workers 4
+        continue-on-error: true
+        timeout-minutes: 180
+
+      - name: Retry today's failures
+        run: python market/collect_all.py --retry
+        continue-on-error: true
+        timeout-minutes: 60
+
+      - name: Finalize - compute metrics + housekeeping
+        run: python market/collect_all.py --finalize
+        continue-on-error: true
+        timeout-minutes: 20
+
+      # ──────────────────────────────────────────────────────────────────
+      # Save the updated database back to the PRIVATE data repo as a release
+      # asset (gzipped). --clobber overwrites the previous day's asset.
+      # ──────────────────────────────────────────────────────────────────
+      - name: Save updated market_tracker.db to private data repo (release asset)
+        env:
+          GH_TOKEN: ${{ secrets.DATA_REPO_PAT }}
+        run: |
+          # Checkpoint the WAL so the .db file is self-contained before compressing.
+          python -c "import sqlite3; db=sqlite3.connect('market/market_tracker.db'); db.execute('PRAGMA wal_checkpoint(TRUNCATE)'); db.close()"
+          gzip -c market/market_tracker.db > market_tracker.db.gz
+          echo "Compressed DB: $(du -h market_tracker.db.gz | cut -f1)"
+          # Create the release once (no-op if it already exists), then upload.
+          gh release create db-latest -R loganmount1/str-tracker-data \
+            -t "Market DB (latest)" -n "Rolling market_tracker.db snapshot" 2>/dev/null || true
+          gh release upload db-latest market_tracker.db.gz -R loganmount1/str-tracker-data --clobber
+          echo "Uploaded market_tracker.db.gz to db-latest release."
+
+      # ──────────────────────────────────────────────────────────────────
+      # OPTIONAL: sync aggregated market data to Supabase.
+      # Disabled by default. Uncomment and provide a sync script if you want
+      # the scraped market data pushed to a Supabase project.
+      # TODO: add your own sync_market_to_supabase.py (NOT included in this
+      #       public repo) before enabling this step.
+      # ──────────────────────────────────────────────────────────────────
+      # - name: Sync market data to Supabase
+      #   env:
+      #     SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      #     SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      #   run: python sync_market_to_supabase.py
+      #   continue-on-error: true
