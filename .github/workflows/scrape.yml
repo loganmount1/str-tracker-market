@@ -12,8 +12,8 @@ on:
         type: boolean
         default: false
   schedule:
-    - cron: '23 17 * * *'    # Daily collection — 17:00 UTC = 10:00 AM PDT
-    - cron: '23 16 * * 1'    # Weekly discovery — Mondays 16:00 UTC = 9:00 AM PDT
+    - cron: '23 17 * * *'    # Daily collection — 17:23 UTC = 10:23 AM PDT
+    - cron: '23 16 * * 1'    # Weekly discovery — Mondays 16:23 UTC = 9:23 AM PDT
 
 permissions:
   contents: read
@@ -67,7 +67,7 @@ jobs:
         run: |
           DISCOVER="false"
           # Weekly discovery cron
-          if [ "${{ github.event.schedule }}" = "0 16 * * 1" ]; then
+          if [ "${{ github.event.schedule }}" = "23 16 * * 1" ]; then
             DISCOVER="true"
           fi
           # Manual override
