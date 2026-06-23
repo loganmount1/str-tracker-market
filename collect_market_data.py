@@ -40,6 +40,22 @@ SEARCH_DATE_OFFSETS = [
     (210, 2),   # ~7 months out (fall), 2-night stay
 ]
 
+# Airbnb caps each search at ~300 results. Slicing by nightly price band makes
+# each (town x band) query return a DIFFERENT set under that cap, so we surface
+# listings the plain search misses (verified: the unfiltered search skips the
+# cheap end entirely). None = the original unfiltered pass. Bands overlap the
+# cap boundaries slightly on purpose; the global dedup handles repeats.
+# To bound runtime, price bands are only applied on the peak date window
+# (PRICE_BAND_WINDOW_DAYS); other windows use a single unfiltered pass.
+SEARCH_PRICE_BANDS = [
+    None,            # unfiltered (original behavior)
+    (0, 200),        # budget
+    (200, 350),
+    (350, 500),
+    (500, None),     # premium lodges (Mt Hood has many large high-end homes)
+]
+PRICE_BAND_WINDOW_DAYS = 120  # apply the band sweep only on this date offset
+
 # Only include listings from actual Mt Hood communities
 MT_HOOD_LOCATIONS = [
     "Rhododendron", "Mount Hood Village", "Government Camp",
@@ -341,71 +357,86 @@ def main():
     for days_out, nights in SEARCH_DATE_OFFSETS:
         checkin = date.today() + timedelta(days=days_out)
         checkout = checkin + timedelta(days=nights)
-        base_params = {
+        window_params = {
             "checkin": checkin.isoformat(),
             "checkout": checkout.isoformat(),
         }
         logger.info(f"\n--- Date window: {checkin} to {checkout} ({days_out} days out) ---")
 
-        for search_url in SEARCH_QUERIES:
-            query_name = search_url.split("/s/")[1].split("/")[0]
-            logger.info(f"\n  Search: {query_name}")
-            page = 1
-            next_cursor = None
-            consecutive_dupes = 0
+        # Apply the price-band sweep only on the peak window; other windows
+        # do a single unfiltered pass (keeps total request volume bounded).
+        price_bands = SEARCH_PRICE_BANDS if days_out == PRICE_BAND_WINDOW_DAYS else [None]
 
-            while page <= MAX_PAGES:
-                logger.info(f"    Page {page}...")
+        for band in price_bands:
+            base_params = dict(window_params)
+            if band is not None:
+                lo, hi = band
+                if lo is not None:
+                    base_params["price_min"] = lo
+                if hi is not None:
+                    base_params["price_max"] = hi
+                band_label = f"${lo or 0}-{hi or '+'}"
+                logger.info(f"\n  Price band: {band_label}")
 
-                params = dict(base_params)
-                if next_cursor:
-                    params["cursor"] = next_cursor
+            for search_url in SEARCH_QUERIES:
+                query_name = search_url.split("/s/")[1].split("/")[0]
+                logger.info(f"\n  Search: {query_name}")
+                page = 1
+                next_cursor = None
+                consecutive_dupes = 0
 
-                try:
-                    listings, next_cursor = fetch_search_page(session, rate_limiter, search_url, params)
+                while page <= MAX_PAGES:
+                    logger.info(f"    Page {page}...")
 
-                    if not listings:
-                        logger.info(f"    No listings on page {page}, stopping")
-                        break
+                    params = dict(base_params)
+                    if next_cursor:
+                        params["cursor"] = next_cursor
 
-                    # Deduplicate using subtitle (actual listing name) or coordinates
-                    # "title" is just type+location like "Cabin in Rhododendron" — not unique
-                    new_listings = []
-                    for l in listings:
-                        # Build a unique key: prefer subtitle, fall back to rounded coords
-                        key = l.get("subtitle") or ""
-                        if not key and l.get("latitude") and l.get("longitude"):
-                            key = f"{round(l['latitude'],4)},{round(l['longitude'],4)}"
-                        if not key:
-                            key = f"{l['title']}_{l['price_per_night']}"
-                        if key not in seen_keys:
-                            seen_keys.add(key)
-                            new_listings.append(l)
+                    try:
+                        listings, next_cursor = fetch_search_page(session, rate_limiter, search_url, params)
 
-                    if not new_listings:
-                        consecutive_dupes += 1
-                        if consecutive_dupes >= 3:
-                            logger.info(f"    3 consecutive dupe pages, stopping")
+                        if not listings:
+                            logger.info(f"    No listings on page {page}, stopping")
                             break
-                        logger.info(f"    All duplicates on page {page}, continuing...")
+
+                        # Deduplicate using subtitle (actual listing name) or coordinates
+                        # "title" is just type+location like "Cabin in Rhododendron" — not unique
+                        new_listings = []
+                        for l in listings:
+                            # Build a unique key: prefer subtitle, fall back to rounded coords
+                            key = l.get("subtitle") or ""
+                            if not key and l.get("latitude") and l.get("longitude"):
+                                key = f"{round(l['latitude'],4)},{round(l['longitude'],4)}"
+                            if not key:
+                                key = f"{l['title']}_{l['price_per_night']}"
+                            if key not in seen_keys:
+                                seen_keys.add(key)
+                                new_listings.append(l)
+
+                        if not new_listings:
+                            consecutive_dupes += 1
+                            if consecutive_dupes >= 3:
+                                logger.info(f"    3 consecutive dupe pages, stopping")
+                                break
+                            logger.info(f"    All duplicates on page {page}, continuing...")
+                            if not next_cursor:
+                                break
+                            page += 1
+                            continue
+
+                        consecutive_dupes = 0
+                        all_listings.extend(new_listings)
+                        logger.info(f"    Got {len(new_listings)} new listings ({len(all_listings)} total)")
+
                         if not next_cursor:
+                            logger.info("    No more pages")
                             break
+
                         page += 1
-                        continue
 
-                    consecutive_dupes = 0
-                    all_listings.extend(new_listings)
-                    logger.info(f"    Got {len(new_listings)} new listings ({len(all_listings)} total)")
-
-                    if not next_cursor:
-                        logger.info("    No more pages")
+                    except Exception as e:
+                        logger.error(f"    Error on page {page}: {type(e).__name__}: {e}")
                         break
-
-                    page += 1
-
-                except Exception as e:
-                    logger.error(f"    Error on page {page}: {type(e).__name__}: {e}")
-                    break
 
     if not all_listings:
         logger.error("No listings collected. Check if Airbnb is blocking requests.")
