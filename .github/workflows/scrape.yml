@@ -137,6 +137,24 @@ jobs:
           gh release upload db-latest market_tracker.db.gz -R loganmount1/str-tracker-data --clobber
           echo "Uploaded market_tracker.db.gz to db-latest release."
 
+          # ── Rolling backup: keep the last 7 daily snapshots ──
+          # db-latest is a single overwriting pointer, so a bad copy can wipe the
+          # only backup. Also store a DATED snapshot in a separate `db-backups`
+          # release and prune to the 7 newest, so there is always a known-good
+          # fallback to roll back to. (Integrity was already verified above, so
+          # every snapshot stored here is good.)
+          DATE_TAG="$(date -u +%Y-%m-%d)"
+          gh release create db-backups -R loganmount1/str-tracker-data \
+            -t "DB rolling backups (last 7 days)" -n "Dated market_tracker.db snapshots; pruned to 7 newest." 2>/dev/null || true
+          gh release upload db-backups "market_tracker.db.gz#market_tracker_${DATE_TAG}.db.gz" -R loganmount1/str-tracker-data --clobber
+          echo "Stored dated backup market_tracker_${DATE_TAG}.db.gz"
+          # Prune: asset names are YYYY-MM-DD so they sort chronologically. Keep
+          # the 7 newest, delete the rest.
+          gh release view db-backups -R loganmount1/str-tracker-data --json assets \
+            --jq '.assets | map(.name) | sort | reverse | .[7:] | .[]' | while read -r OLD; do
+              [ -n "$OLD" ] && gh release delete-asset db-backups "$OLD" -R loganmount1/str-tracker-data --yes && echo "Pruned old backup: $OLD"
+            done
+
       # ──────────────────────────────────────────────────────────────────
       # OPTIONAL: sync aggregated market data to Supabase.
       # Disabled by default. Uncomment and provide a sync script if you want
