@@ -57,8 +57,10 @@ jobs:
             # GUARD: refuse to build on a corrupt DB. Exiting non-zero here means
             # the job fails BEFORE the upload step, so the good release asset is
             # never overwritten by a bad run. (This is exactly the failure mode
-            # that silently destroyed the backup on 2026-06-25.)
-            python -c "import sqlite3,sys; r=sqlite3.connect('market/market_tracker.db').execute('PRAGMA quick_check').fetchone()[0]; print('Restored DB integrity:', r); sys.exit(0 if r=='ok' else 1)"
+            # that silently destroyed the backup on 2026-06-25.) Use the FULL
+            # integrity_check, not quick_check — on 2026-06-28 a corrupt DB slipped
+            # past quick_check and got uploaded; the fuller check catches it.
+            python -c "import sqlite3,sys; r=sqlite3.connect('market/market_tracker.db').execute('PRAGMA integrity_check').fetchone()[0]; print('Restored DB integrity:', r); sys.exit(0 if r=='ok' else 1)"
           else
             echo "No existing DB release found — first run will create one via discovery + init_db."
           fi
@@ -123,14 +125,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.DATA_REPO_PAT }}
         run: |
-          # GUARD: never overwrite the good backup with a corrupt DB. Verify
-          # integrity BEFORE compressing/uploading; exit non-zero on failure so
-          # the job goes red and the previous good asset is preserved.
-          python -c "import sqlite3,sys; r=sqlite3.connect('market/market_tracker.db').execute('PRAGMA quick_check').fetchone()[0]; print('Pre-upload DB integrity:', r); sys.exit(0 if r=='ok' else 1)"
           # Checkpoint the WAL so the .db file is self-contained before compressing.
           python -c "import sqlite3; db=sqlite3.connect('market/market_tracker.db'); db.execute('PRAGMA wal_checkpoint(TRUNCATE)'); db.close()"
           gzip -c market/market_tracker.db > market_tracker.db.gz
           echo "Compressed DB: $(du -h market_tracker.db.gz | cut -f1)"
+          # GUARD: verify the EXACT artifact we are about to upload. Decompress the
+          # gzip to a temp file and run a FULL integrity_check on THAT. This catches
+          # corruption introduced anywhere — collection, WAL checkpoint, or gzip —
+          # whereas an in-place check of the live DB does not: on 2026-06-28 the
+          # corruption passed an in-place quick_check but the uploaded bytes were
+          # still bad, which silently corrupted db-latest. Exit non-zero on failure
+          # so the job goes red and the previous good db-latest is preserved.
+          gunzip -kc market_tracker.db.gz > /tmp/_verify_upload.db
+          python -c "import sqlite3,sys; r=sqlite3.connect('/tmp/_verify_upload.db').execute('PRAGMA integrity_check').fetchone()[0]; print('Upload-artifact integrity:', r); sys.exit(0 if r=='ok' else 1)"
+          rm -f /tmp/_verify_upload.db
           # Create the release once (no-op if it already exists), then upload.
           gh release create db-latest -R loganmount1/str-tracker-data \
             -t "Market DB (latest)" -n "Rolling market_tracker.db snapshot" 2>/dev/null || true
