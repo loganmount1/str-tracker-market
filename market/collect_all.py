@@ -63,8 +63,12 @@ def db_write_with_retry(db, func, max_retries=5):
     return False
 
 
-def collect(batch=None, total_batches=None):
-    """Collect calendar, details, reviews, AND pricing for a batch of properties."""
+def collect(batch=None, total_batches=None, workers=1):
+    """Collect calendar, details, reviews, AND pricing.
+
+    Scraping runs across `workers` threads (each with its own collector/rate limiter),
+    but ALL database writes happen on this single thread through one connection — so
+    there is never concurrent multi-process access to the SQLite file."""
     db = get_db()
     today = date.today().isoformat()
     start_time = time.time()
@@ -105,15 +109,28 @@ def collect(batch=None, total_batches=None):
     # Same-day/next-day cutoff — skip dates within 2 days to avoid false bookings
     _cutoff_date = (date.today() + timedelta(days=2)).isoformat()
 
-    rate_limiter = RateLimiter(delays={"airbnb.com": 3.5}, jitter=1.5)
-    collector = AirbnbCollector(rate_limiter)
+    # Each scraper thread gets its OWN collector + rate limiter (thread-local), so
+    # `workers` threads produce `workers` independent request streams — the same
+    # aggregate rate the old N-process design had — while ALL DB writes happen on
+    # this single main thread through one connection. That eliminates the concurrent
+    # multi-process writes to one SQLite file that were corrupting the DB (~1 in 5
+    # runs, caught by the cloud integrity guards). See project memory 2026-07-06.
+    _thread_local = threading.local()
+
+    def _get_collector():
+        c = getattr(_thread_local, "collector", None)
+        if c is None:
+            c = AirbnbCollector(RateLimiter(delays={"airbnb.com": 3.5}, jitter=1.5))
+            _thread_local.collector = c
+        return c
 
     collected = 0
     priced = 0
     errors = 0
 
     def _collect_one(coll, pid):
-        """Collect a single property (runs in thread for timeout)."""
+        """Scrape one property (calendar + details + pricing). Network only — never
+        touches the database."""
         cal = coll.collect_calendar(pid)
         det = coll.collect_details(pid)
         prices = {}
@@ -131,26 +148,36 @@ def collect(batch=None, total_batches=None):
                                               min_nights_map=min_nights_map) or {}
         return cal, det, prices
 
-    for i, prop in enumerate(to_collect):
-        prop_id = prop["id"]
-        platform_id = prop["platform_id"]
+    def _scrape(prop):
+        """Runs in a worker thread. Scrapes one property with a 120s timeout."""
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            fut = ex.submit(_collect_one, _get_collector(), prop["platform_id"])
+            return fut.result(timeout=120)
 
-        # Refresh session every 50 properties to avoid stale connections
-        if i > 0 and i % 50 == 0:
-            logger.info("  Refreshing HTTP session...")
-            collector = AirbnbCollector(rate_limiter)
+    done = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(workers, 1)) as pool:
+        future_to_prop = {pool.submit(_scrape, prop): prop for prop in to_collect}
+        for future in concurrent.futures.as_completed(future_to_prop):
+            prop = future_to_prop[future]
+            prop_id = prop["id"]
+            done += 1
 
-        if (i + 1) % 25 == 0:
-            elapsed = time.time() - start_time
-            rate = (i + 1) / elapsed * 60 if elapsed > 0 else 0
-            remaining = (len(to_collect) - i - 1) / rate if rate > 0 else 0
-            logger.info(f"  Progress: {i+1}/{len(to_collect)} ({rate:.0f}/min, ~{remaining:.0f} min left)")
+            if done % 25 == 0:
+                elapsed = time.time() - start_time
+                rate = done / elapsed * 60 if elapsed > 0 else 0
+                remaining = (len(to_collect) - done) / rate if rate > 0 else 0
+                logger.info(f"  Progress: {done}/{len(to_collect)} ({rate:.0f}/min, ~{remaining:.0f} min left)")
 
-        try:
-            # Run collection in a thread with 120s timeout
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(_collect_one, collector, platform_id)
-                calendar_data, details, prices = future.result(timeout=120)
+            try:
+                calendar_data, details, prices = future.result()
+            except concurrent.futures.TimeoutError:
+                errors += 1
+                logger.warning(f"  TIMEOUT [{done}] {prop['name'][:40]}: hung for >120s, skipping")
+                continue
+            except Exception as e:
+                errors += 1
+                logger.warning(f"  Error [{done}] {prop['name'][:40]}: {type(e).__name__}: {str(e)[:80]}")
+                continue
 
             def _write_to_db(db):
                 if calendar_data:
@@ -219,26 +246,15 @@ def collect(batch=None, total_batches=None):
                     WHERE id = ? AND updated_at < datetime('now', '-2 days')
                 """, (prop_id,))
 
+            # Single-threaded writer: only THIS (main) thread ever writes to `db`.
             db_write_with_retry(db, _write_to_db)
 
             if prices:
                 priced += 1
             collected += 1
 
-        except concurrent.futures.TimeoutError:
-            errors += 1
-            logger.warning(f"  TIMEOUT [{i+1}] {prop['name'][:40]}: hung for >120s, skipping")
-            collector = AirbnbCollector(rate_limiter)
-            time.sleep(5)
-        except Exception as e:
-            errors += 1
-            logger.warning(f"  Error [{i+1}] {prop['name'][:40]}: {type(e).__name__}: {str(e)[:80]}")
-            # Cooldown after errors to avoid hammering a struggling API
-            time.sleep(5)
-
-        # Commit every 25 properties
-        if (i + 1) % 25 == 0:
-            db.commit()
+            if done % 25 == 0:
+                db.commit()
 
     db.commit()
 
@@ -534,29 +550,13 @@ def compute_metrics(db, snapshot_date, property_ids=None):
 
 
 def collect_parallel(num_workers=2):
-    """Run collection with multiple parallel workers, each handling a slice of properties."""
-    import multiprocessing
-
-    db = get_db()
-    total = db.execute("SELECT COUNT(*) FROM properties WHERE active=1").fetchone()[0]
-    db.close()
-
-    logger.info(f"Starting {num_workers} parallel workers for {total} properties")
-
-    processes = []
-    for i in range(1, num_workers + 1):
-        p = multiprocessing.Process(target=collect, args=(i, num_workers))
-        p.start()
-        processes.append((i, p))
-        time.sleep(3)  # Stagger starts to desync rate limiters
-
-    # Wait for all workers
-    for batch_num, p in processes:
-        p.join()
-        status = "OK" if p.exitcode == 0 else f"FAILED (exit {p.exitcode})"
-        logger.info(f"  Worker {batch_num}/{num_workers}: {status}")
-
-    logger.info("All workers complete")
+    """Collect all properties using `num_workers` scraper THREADS in a single process
+    (one DB connection, one writer). Replaces the old multi-PROCESS design where N
+    processes wrote the same SQLite file concurrently and intermittently corrupted it.
+    Kept as a named entry point so the CLI/workflow (`--workers N`) is unchanged."""
+    logger.info(f"Starting collection with {num_workers} scraper threads (single writer)")
+    collect(workers=num_workers)
+    logger.info("Collection complete")
 
 
 def export_market_comps():
