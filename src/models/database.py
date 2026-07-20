@@ -150,6 +150,17 @@ CREATE TABLE IF NOT EXISTS market_listings (
     has_hot_tub INTEGER DEFAULT 0,
     has_pet_friendly INTEGER DEFAULT 0,
     is_tracked INTEGER DEFAULT 0,
+    -- Added to the base schema 2026-07-15: collect_market_data.py and
+    -- sync_new_listings.py both require these, but they were only ever added to
+    -- the local dev DB via ad-hoc migration — so a FRESH DB (every cloud run)
+    -- lacked them. collect_market_data's INSERT then silently failed (swallowed
+    -- try/except) leaving market_listings empty, and sync_new_listings crashed on
+    -- `no such column: listing_id`. Result: cloud discovery added ZERO new
+    -- listings for ~4 weeks despite "succeeding".
+    listing_id TEXT,
+    airbnb_url TEXT,
+    cover_photo TEXT,
+    host_name TEXT,
     UNIQUE(snapshot_date, title, price_per_night)
 );
 

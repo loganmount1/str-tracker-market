@@ -69,13 +69,22 @@ def main():
     """, (latest,)).fetchall()
 
     added = 0
+    skipped_noncorridor = 0
     for listing in listings:
         prop_id = f"airbnb_{listing['listing_id']}"
         if prop_id in existing:
             continue
 
         location = listing["location"] or "Unknown"
-        market = LOCATION_TO_MARKET.get(location, "mt_hood_other")
+        # Corridor filter (added 2026-07-20): only add listings in a known Mt Hood
+        # corridor town. Airbnb's search radius bleeds into the Gorge (Hood River),
+        # Washington (Washougal), and Portland-metro (Troutdale, Estacada), plus
+        # "Unknown" (title didn't parse) — none belong in a Mt Hood tracker.
+        # LOCATION_TO_MARKET is the curated corridor whitelist.
+        if location not in LOCATION_TO_MARKET:
+            skipped_noncorridor += 1
+            continue
+        market = LOCATION_TO_MARKET[location]
         comp_set = bedrooms_to_comp_set(listing["bedrooms"])
         name = listing["subtitle"] or listing["title"] or "Unknown"
 
@@ -99,7 +108,7 @@ def main():
 
     mdb.commit()
     total = mdb.execute("SELECT COUNT(*) FROM properties").fetchone()[0]
-    logger.info(f"Synced {added} new properties. Total in market DB: {total}")
+    logger.info(f"Synced {added} new corridor properties ({skipped_noncorridor} non-corridor skipped). Total in market DB: {total}")
 
     main_db.close()
     mdb.close()
