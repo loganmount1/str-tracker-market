@@ -17,11 +17,19 @@ on:
 
 permissions:
   contents: read
+  pages: write        # deploy the market dashboard to GitHub Pages
+  id-token: write     # required by actions/deploy-pages
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
     timeout-minutes: 300
+    # Publishes the market dashboard to GitHub Pages at the end of the run. This
+    # replaces the fragile Mac-based site refresh (580MB download + Vercel upload
+    # over a home connection kept failing). Everything runs in the cloud now.
+    environment:
+      name: github-pages
+      url: ${{ steps.pages_deploy.outputs.page_url }}
 
     steps:
       - name: Checkout scraper repo
@@ -166,6 +174,32 @@ jobs:
             --jq '.assets | map(.name) | sort | reverse | .[7:] | .[]' | while read -r OLD; do
               [ -n "$OLD" ] && gh release delete-asset db-backups "$OLD" -R loganmount1/str-tracker-data --yes && echo "Pruned old backup: $OLD"
             done
+
+      # ──────────────────────────────────────────────────────────────────
+      # Publish the market dashboard to GitHub Pages (replaces the Mac refresh).
+      # The DB is already on the runner here, so no 580MB download and no Vercel
+      # upload over a home connection — the two things that kept the old site
+      # refresh failing. Build failures are non-fatal (data is already saved above).
+      # ──────────────────────────────────────────────────────────────────
+      - name: Build market dashboard site (_site/)
+        env:
+          PYTHON: python
+        run: bash build_market_site.sh
+        continue-on-error: true
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        continue-on-error: true
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+        continue-on-error: true
+
+      - name: Deploy to GitHub Pages
+        id: pages_deploy
+        uses: actions/deploy-pages@v4
 
       # ──────────────────────────────────────────────────────────────────
       # OPTIONAL: sync aggregated market data to Supabase.

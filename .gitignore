@@ -18,3 +18,8 @@ config/credentials/
 
 # Logs
 *.log
+market/market_tracker.db
+_site/
+market/report.html
+market/property_report.csv
+market/reports/
