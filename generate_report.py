@@ -863,6 +863,21 @@ function _basePath() {{
   if (!p.endsWith('/')) p += '/';
   return p;
 }}
+// Defined here, next to the <select>, NOT in the script at the end of the file.
+// The report is ~11 MB, so a definition at the bottom is not parsed until long
+// after the picker is clickable and every onchange throws ReferenceError until
+// then. Moved up 2026-08-14 to fix the dead date dropdown.
+function switchDate(dateStr) {{
+  const sel = document.getElementById('dateSelect');
+  const basePath = _basePath();
+  // Use data-latest (embedded at build time) OR first option from dates.json
+  const latestDate = sel.dataset.latest || (sel.options.length ? sel.options[0].value : null);
+  if (dateStr === latestDate) {{
+    window.location.href = basePath;
+  }} else {{
+    window.location.href = basePath + 'reports/' + dateStr + '/report.html';
+  }}
+}}
 document.getElementById('latestLink').href = _basePath();
 // Dynamically load all available dates so archived reports can navigate forward
 fetch(_basePath() + 'dates.json').then(r => r.json()).then(dates => {{
@@ -1497,19 +1512,8 @@ function toggleTierList(id) {
   row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
 }
 
-function switchDate(dateStr) {
-  const sel = document.getElementById('dateSelect');
-  const currentPath = window.location.pathname;
-  let basePath = currentPath.replace(/\/reports\/\d{4}-\d{2}-\d{2}\/report\.html$/, '').replace(/\/index\.html$/, '').replace(/\/report\.html$/, '');
-  if (!basePath.endsWith('/')) basePath += '/';
-  // Use data-latest (embedded at build time) OR first option from dates.json
-  const latestDate = sel.dataset.latest || (sel.options.length ? sel.options[0].value : null);
-  if (dateStr === latestDate) {
-    window.location.href = basePath;
-  } else {
-    window.location.href = basePath + 'reports/' + dateStr + '/report.html';
-  }
-}
+// switchDate now lives in the inline script beside the <select>, near the top of
+// the document, so it exists before the picker can be used.
 
 function filterTable() {
   const search = document.getElementById("search").value.toLowerCase();
