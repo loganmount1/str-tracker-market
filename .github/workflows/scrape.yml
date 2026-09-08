@@ -23,7 +23,13 @@ permissions:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    # Never let two runs overlap: both would restore db-latest, both would scrape,
+    # and whichever uploaded LAST would silently erase the other's day of data.
+    # A manual dispatch that lands during the scheduled run now waits its turn.
+    concurrency:
+      group: market-scrape
+      cancel-in-progress: false
+    timeout-minutes: 360   # GitHub-hosted max; Vacasa step added 2026-09-08
     # Publishes the market dashboard to GitHub Pages at the end of the run. This
     # replaces the fragile Mac-based site refresh (580MB download + Vercel upload
     # over a home connection kept failing). Everything runs in the cloud now.
@@ -119,6 +125,17 @@ jobs:
         run: python market/collect_all.py --retry
         continue-on-error: true
         timeout-minutes: 60
+
+      # ── Vacasa (every run) ──
+      # Vacasa left Airbnb in Mar 2026, so their ~76 Mt Hood homes are scraped from
+      # vacasa.com directly. Ported from the retired Mac pipeline 2026-09-08. The
+      # --max-minutes budget is the fix for what killed that pipeline: this phase
+      # used to wedge for 25+ hours on connection-reset storms and silently eat the
+      # next day's run. Now it stops cleanly and the leftovers wait for tomorrow.
+      - name: Collect Vacasa calendars + pricing (direct scrape)
+        run: python market/collect_vacasa.py --max-minutes 110
+        continue-on-error: true
+        timeout-minutes: 120
 
       - name: Finalize - compute metrics + housekeeping
         run: python market/collect_all.py --finalize

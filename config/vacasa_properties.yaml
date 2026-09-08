@@ -1,0 +1,244 @@
+markets:
+  government_camp:
+    label: Government Camp, OR
+    properties:
+    - unit_id: '1014961'
+      nickname: Brooke and Dan's
+      comp_set: 3br
+    - unit_id: '1014964'
+      nickname: Little Trail Lodge - Unit A
+      comp_set: 4br
+    - unit_id: '1014965'
+      nickname: 'Wild West  -Collins Lake #11'
+      comp_set: 2br
+    - unit_id: '1014971'
+      nickname: '#302 Grand Lodge South'
+      comp_set: 3br
+    - unit_id: '1014974'
+      nickname: Creek Ridge Escape
+      comp_set: 2br
+    - unit_id: '1015135'
+      nickname: The Wilcox Cabin
+      comp_set: 3br
+    - unit_id: '1015161'
+      nickname: 'Sno-Bird #10'
+      comp_set: 2br
+    - unit_id: '1015164'
+      nickname: Blue Pine Chalet
+      comp_set: 3br
+    - unit_id: '1015185'
+      nickname: '#102 Grand Lodge South'
+      comp_set: 3br
+    - unit_id: '1015189'
+      nickname: Happy Hours
+      comp_set: 3br
+    - unit_id: '1015215'
+      nickname: Cozy Cabin in Government Camp
+      comp_set: 2br
+    - unit_id: '1015267'
+      nickname: 'Collins Lake #112'
+      comp_set: 2br
+    - unit_id: '1015270'
+      nickname: '#104 Grand Lodge South'
+      comp_set: 3br
+    - unit_id: '1015423'
+      nickname: Brooke and Dan's Retreat - 3 BR Home Plus a 2 BR Apartment
+      comp_set: 5br
+    - unit_id: '1015424'
+      nickname: Edelweiss Retreat
+      comp_set: 3br
+    - unit_id: '1015425'
+      nickname: Alpine Haus
+      comp_set: 2br
+    - unit_id: '1015435'
+      nickname: Gretel Cabin
+      comp_set: 3br
+    - unit_id: '1015436'
+      nickname: Mountain House on Lige Lane
+      comp_set: 4br
+    - unit_id: '1015438'
+      nickname: L'Alpiniste Souriant
+      comp_set: 3br
+    - unit_id: '1015439'
+      nickname: Collins Lake Condo
+      comp_set: 2br
+    - unit_id: '1015463'
+      nickname: '#204 Grand Lodge South'
+      comp_set: 3br
+    - unit_id: '1015464'
+      nickname: '#301  Grand Lodge South Master Suite'
+      comp_set: 3br
+    - unit_id: '1015465'
+      nickname: '#401 Grand Lodge South Penthouse'
+      comp_set: 1br
+    - unit_id: '1015466'
+      nickname: Baernhaus
+      comp_set: 2br
+    - unit_id: '1015467'
+      nickname: Mt Hood House Hideaway on Steel Lane
+      comp_set: 4br
+    - unit_id: '1015469'
+      nickname: The Cozy Govy Cabin
+      comp_set: 3br
+    - unit_id: '1015488'
+      nickname: '#203  Grand Lodge South'
+      comp_set: 3br
+    - unit_id: '1015491'
+      nickname: 'Golden Poles Chalet #110'
+      comp_set: 2br
+    - unit_id: '1015492'
+      nickname: Cedar Raven
+      comp_set: 1br
+    - unit_id: '1015493'
+      nickname: Alpine Hideaway
+      comp_set: 2br
+    - unit_id: '1015712'
+      nickname: Snocade Camp
+      comp_set: 6br
+  welches:
+    label: Welches, OR
+    properties:
+    - unit_id: '1014992'
+      nickname: The Cedars Cabin
+      comp_set: 2br
+    - unit_id: '1015172'
+      nickname: Peaceful Pines
+      comp_set: 3br
+    - unit_id: '1015201'
+      nickname: Retreat on the Salmon River
+      comp_set: 2br
+    - unit_id: '1015202'
+      nickname: Hood Hideaway
+      comp_set: 5br
+    - unit_id: '1015376'
+      nickname: Golfer's Villa
+      comp_set: 3br
+    - unit_id: '1015429'
+      nickname: Welches Fairway Retreat
+      comp_set: 2br
+    - unit_id: '1015452'
+      nickname: Stone's Throw
+      comp_set: 4br
+    - unit_id: '1015453'
+      nickname: Golfer's Daydream
+      comp_set: 2br
+    - unit_id: '1015455'
+      nickname: Cozy Casita
+      comp_set: 0br
+    - unit_id: '1015456'
+      nickname: Cedar Cabin
+      comp_set: 1br
+    - unit_id: '1015480'
+      nickname: The Cedar House
+      comp_set: 3br
+    - unit_id: '1015500'
+      nickname: Campfire Cabin on the River
+      comp_set: 2br
+    - unit_id: '1015920'
+      nickname: Edgewood
+      comp_set: 3br
+    - unit_id: '1015921'
+      nickname: Chalet Shangri-La
+      comp_set: 0br
+  rhododendron:
+    label: Rhododendron, OR
+    properties:
+    - unit_id: '1014978'
+      nickname: Sandy Ski Chalet
+      comp_set: 3br
+    - unit_id: '1014988'
+      nickname: Hunter's Haven
+      comp_set: 2br
+    - unit_id: '1014991'
+      nickname: Timberline Ski Haus
+      comp_set: 3br
+    - unit_id: '1015168'
+      nickname: Big Bear River Retreat
+      comp_set: 3br
+    - unit_id: '1015169'
+      nickname: The Burrow at Zig Zag
+      comp_set: 3br
+    - unit_id: '1015192'
+      nickname: Sandy River Relaxation
+      comp_set: 2br
+    - unit_id: '1015193'
+      nickname: Lookout Lair
+      comp_set: 2br
+    - unit_id: '1015218'
+      nickname: Syca-LOT-More Lodge
+      comp_set: 2br
+    - unit_id: '1015273'
+      nickname: Barlow Creekside Lodge
+      comp_set: 3br
+    - unit_id: '1015274'
+      nickname: Roaring River Retreat
+      comp_set: 1br
+    - unit_id: '1015275'
+      nickname: Hygge Cabin On The River
+      comp_set: 3br
+    - unit_id: '1015276'
+      nickname: Riverside Sanctuary
+      comp_set: 2br
+    - unit_id: '1015405'
+      nickname: Huckleberry Haven
+      comp_set: 2br
+    - unit_id: '1015406'
+      nickname: Mountain Meadow Lodge
+      comp_set: 2br
+    - unit_id: '1015444'
+      nickname: Shadowbrook Chalet
+      comp_set: 3br
+    - unit_id: '1015445'
+      nickname: Rustling Waters Retreat
+      comp_set: 2br
+    - unit_id: '1015446'
+      nickname: Sycamore Lodge
+      comp_set: 3br
+    - unit_id: '1015447'
+      nickname: Sandy River Serenade
+      comp_set: 3br
+    - unit_id: '1015472'
+      nickname: Alder Wood
+      comp_set: 1br
+    - unit_id: '1015474'
+      nickname: The Foxes Den
+      comp_set: 3br
+    - unit_id: '1015475'
+      nickname: River Lily Retreat
+      comp_set: 3br
+    - unit_id: '1015499'
+      nickname: John Lake Lodge
+      comp_set: 3br
+    - unit_id: '1015521'
+      nickname: Clear Creek Retreat
+      comp_set: 4br
+    - unit_id: '1015866'
+      nickname: Azalea Breeze
+      comp_set: 3br
+    - unit_id: '1015868'
+      nickname: The Mountain House
+      comp_set: 3br
+  brightwood:
+    label: Brightwood, OR
+    properties:
+    - unit_id: '1015432'
+      nickname: Best Log Cabin
+      comp_set: 2br
+    - unit_id: '1015937'
+      nickname: Zoe's Log Cabin
+      comp_set: 1br
+  sandy:
+    label: Sandy, OR
+    properties:
+    - unit_id: '107945'
+      nickname: Kelly Creek Retreat
+      comp_set: unknown
+    - unit_id: '4552'
+      nickname: The Buxton
+      comp_set: unknown
+    - unit_id: '1015476'
+      nickname: Sandy River Retreat
+      comp_set: 1br
+    - unit_id: '1015477'
+      nickname: The get-A-way
+      comp_set: 1br

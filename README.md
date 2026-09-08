@@ -42,3 +42,14 @@ python market/collect_all.py --finalize   # compute metrics + housekeeping
 - All dates are stored as ISO strings (`YYYY-MM-DD`).
 - Property IDs follow the `airbnb_{listing_id}` convention.
 - The Airbnb API key in `src/collectors/airbnb.py` is Airbnb's **public** client-side web key (the same one every browser sends); it is not a private credential.
+
+## Vacasa (added 2026-09-08)
+
+Vacasa took their Mt Hood homes off Airbnb in March 2026, so the Airbnb collector
+never sees them. `market/collect_vacasa.py` scrapes vacasa.com directly for the
+units listed in `config/vacasa_properties.yaml` (public unit IDs only) and writes
+them into the same tables with `platform='vacasa'`. It runs after the Airbnb retry
+pass with a hard `--max-minutes` budget so a slow night can't stall the workflow.
+The Airbnb collector and the 14-day deactivation sweep are gated to
+`platform='airbnb'`; a Vacasa unit is deactivated only when vacasa.com itself
+redirects it away.

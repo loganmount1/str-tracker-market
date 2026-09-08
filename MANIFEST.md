@@ -22,6 +22,10 @@ project, prepared for publication as a public repo. Source root:
 | `src/collectors/__init__.py`            | `/Users/simply/str-tracker/src/collectors/__init__.py`       |
 | `src/collectors/base.py`                | `/Users/simply/str-tracker/src/collectors/base.py`           |
 | `src/collectors/airbnb.py`              | `/Users/simply/str-tracker/src/collectors/airbnb.py`         |
+| `src/analytics/__init__.py`             | (new, 2026-09-08)                                            |
+| `src/analytics/metrics.py`              | `/Users/simply/str-tracker/src/analytics/metrics.py`         |
+| `market/collect_vacasa.py`              | `/Users/simply/str-tracker/collect_vacasa.py` (adapted)      |
+| `config/vacasa_properties.yaml`         | `/Users/simply/str-tracker/config/vacasa_properties.yaml` (pruned to live units) |
 
 14 source files copied (verbatim). Newly authored files: `.gitignore`,
 `README.md`, `.github/workflows/scrape.yml`, `MANIFEST.md`.
@@ -34,6 +38,8 @@ Traced transitively from the four entry scripts. The full closure:
 - `market/collect_all.py` → `src.collectors.airbnb`, `src.utils.http`
 - `market/init_db.py` → stdlib only (sqlite3, logging)
 - `market/sync_new_listings.py` → stdlib only
+- `market/collect_vacasa.py` → `src.analytics.metrics`, `src.models.database`, pip `requests`, `pyyaml`
+- `src.analytics.metrics` → stdlib only (sqlite3, datetime)
 - `src.collectors.airbnb` → `src.collectors.base`, `src.utils.http`
 - `src.collectors.base` → stdlib only (abc, dataclasses, datetime, typing)
 - `src.models.database` → stdlib only (sqlite3, json, datetime, pathlib)

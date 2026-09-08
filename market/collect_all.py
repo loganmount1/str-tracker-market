@@ -75,7 +75,7 @@ def collect(batch=None, total_batches=None, workers=1):
 
     # Get all active properties, ordered consistently
     all_props = db.execute(
-        "SELECT id, platform_id, url, name, host_name, bedrooms FROM properties WHERE active=1 ORDER BY id"
+        "SELECT id, platform_id, url, name, host_name, bedrooms FROM properties WHERE active=1 AND platform='airbnb' ORDER BY id"
     ).fetchall()
 
     # Slice for batch
@@ -303,7 +303,7 @@ def retry_failures():
     missing = db.execute("""
         SELECT p.id, p.platform_id, p.url, p.name, p.host_name, p.bedrooms
         FROM properties p
-        WHERE p.active = 1 AND p.id NOT IN (
+        WHERE p.active = 1 AND p.platform = 'airbnb' AND p.id NOT IN (
             SELECT DISTINCT property_id FROM calendar_snapshots WHERE snapshot_date = ?
         )
         ORDER BY p.id
@@ -333,10 +333,12 @@ def finalize():
 
     # ── Deactivate dead listings ──
     # Properties that haven't been successfully collected in 14+ days
-    total_active = db.execute("SELECT COUNT(*) FROM properties WHERE active=1").fetchone()[0]
+    # Airbnb-only: Vacasa units are managed by collect_vacasa.py (it deactivates a unit
+    # itself when vacasa.com redirects it away), so they are excluded from this sweep.
+    total_active = db.execute("SELECT COUNT(*) FROM properties WHERE active=1 AND platform='airbnb'").fetchone()[0]
     stale = db.execute("""
         SELECT p.id, p.name FROM properties p
-        WHERE p.active = 1 AND p.id NOT IN (
+        WHERE p.active = 1 AND p.platform = 'airbnb' AND p.id NOT IN (
             SELECT DISTINCT property_id FROM calendar_snapshots
             WHERE snapshot_date >= date(?, '-14 days')
         )
