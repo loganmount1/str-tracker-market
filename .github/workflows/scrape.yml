@@ -11,6 +11,10 @@ on:
         description: "Force a discovery pass on this manual run"
         type: boolean
         default: false
+      allow_fresh_start:
+        description: "DANGER: allow starting from an EMPTY database if no saved DB can be restored"
+        type: boolean
+        default: false
   schedule:
     - cron: '23 14 * * *'    # Daily collection — 14:23 UTC = 7:23 AM PDT
     - cron: '23 16 * * 1'    # Weekly discovery — Mondays 16:23 UTC = 9:23 AM PDT
@@ -64,7 +68,28 @@ jobs:
           GH_TOKEN: ${{ secrets.DATA_REPO_PAT }}
         run: |
           mkdir -p market data
+          # Try db-latest first; if it is missing (a failed --clobber upload deletes it
+          # before the new copy lands), fall back to the newest dated backup. Starting
+          # from an empty DB is NEVER automatic: on 2026-09-18 this step treated a
+          # missing db-latest as "first run", began from scratch, and the upload step
+          # then overwrote ~6 months of history for ~1,000 homes with 368 new ones.
+          RESTORED=""
           if gh release download db-latest -R loganmount1/str-tracker-data -p 'market_tracker.db.gz' -D /tmp 2>/dev/null; then
+            RESTORED="db-latest"
+          else
+            echo "::warning::db-latest missing; falling back to newest db-backups snapshot."
+            NEWEST=$(gh release view db-backups -R loganmount1/str-tracker-data --json assets \
+              --jq '.assets | map(.name) | sort | reverse | .[0] // empty' 2>/dev/null || true)
+            if [ -n "$NEWEST" ] && gh release download db-backups -R loganmount1/str-tracker-data -p "$NEWEST" -D /tmp; then
+              mv "/tmp/$NEWEST" /tmp/market_tracker.db.gz
+              RESTORED="db-backups/$NEWEST"
+            fi
+          fi
+          if [ -n "$RESTORED" ]; then
+            echo "Restoring from $RESTORED"
+            # Remember the size we started from; the save step refuses to upload a
+            # DB that has shrunk sharply (the signature of a wipe).
+            echo "RESTORED_GZ_BYTES=$(stat -c %s /tmp/market_tracker.db.gz)" >> "$GITHUB_ENV"
             gunzip -f /tmp/market_tracker.db.gz
             mv /tmp/market_tracker.db market/market_tracker.db
             echo "Restored DB: $(du -h market/market_tracker.db | cut -f1)"
@@ -75,8 +100,13 @@ jobs:
             # integrity_check, not quick_check — on 2026-06-28 a corrupt DB slipped
             # past quick_check and got uploaded; the fuller check catches it.
             python -c "import sqlite3,sys; r=sqlite3.connect('market/market_tracker.db').execute('PRAGMA integrity_check').fetchone()[0]; print('Restored DB integrity:', r); sys.exit(0 if r=='ok' else 1)"
+          elif [ "${{ github.event.inputs.allow_fresh_start }}" = "true" ]; then
+            echo "::warning::No saved DB found; starting fresh because allow_fresh_start was set."
+            echo "RESTORED_GZ_BYTES=0" >> "$GITHUB_ENV"
           else
-            echo "No existing DB release found — first run will create one via discovery + init_db."
+            echo "::error::No saved DB could be restored (db-latest and db-backups both unavailable)."
+            echo "::error::Refusing to start from an empty DB. Re-run manually with allow_fresh_start only if that is truly intended."
+            exit 1
           fi
 
       # ──────────────────────────────────────────────────────────────────
@@ -164,13 +194,20 @@ jobs:
           gunzip -kc market_tracker.db.gz > /tmp/_verify_upload.db
           python -c "import sqlite3,sys; r=sqlite3.connect('/tmp/_verify_upload.db').execute('PRAGMA integrity_check').fetchone()[0]; print('Upload-artifact integrity:', r); sys.exit(0 if r=='ok' else 1)"
           rm -f /tmp/_verify_upload.db
-          # Create the release once (no-op if it already exists), then upload.
-          gh release create db-latest -R loganmount1/str-tracker-data \
-            -t "Market DB (latest)" -n "Rolling market_tracker.db snapshot" 2>/dev/null || true
-          gh release upload db-latest market_tracker.db.gz -R loganmount1/str-tracker-data --clobber
-          echo "Uploaded market_tracker.db.gz to db-latest release."
+          # GUARD: refuse to upload a DB that shrank sharply versus what we restored.
+          # Normal days only grow; a big drop means the history went missing. On
+          # 2026-09-18 a fresh ~1 MB DB replaced a ~1 GB one and nothing stopped it.
+          NEW_BYTES=$(stat -c %s market_tracker.db.gz)
+          echo "Restored ${RESTORED_GZ_BYTES:-0} bytes gz -> saving ${NEW_BYTES} bytes gz"
+          if [ "${RESTORED_GZ_BYTES:-0}" -gt 0 ] && [ "$NEW_BYTES" -lt $(( RESTORED_GZ_BYTES * 8 / 10 )) ]; then
+            echo "::error::New DB is under 80% of the restored size. Not uploading; the saved copies are untouched."
+            exit 1
+          fi
 
           # ── Rolling backup: keep the last 7 daily snapshots ──
+          # Uploaded BEFORE db-latest: `--clobber` deletes the old db-latest before the
+          # new one finishes, so if that upload dies there must already be a fresh
+          # dated copy for the next run's restore fallback to pick up.
           # db-latest is a single overwriting pointer, so a bad copy can wipe the
           # only backup. Also store a DATED snapshot in a separate `db-backups`
           # release and prune to the 7 newest, so there is always a known-good
@@ -191,6 +228,12 @@ jobs:
             --jq '.assets | map(.name) | sort | reverse | .[7:] | .[]' | while read -r OLD; do
               [ -n "$OLD" ] && gh release delete-asset db-backups "$OLD" -R loganmount1/str-tracker-data --yes && echo "Pruned old backup: $OLD"
             done
+
+          # Now replace db-latest (the dated backup above is the safety net if this fails).
+          gh release create db-latest -R loganmount1/str-tracker-data \
+            -t "Market DB (latest)" -n "Rolling market_tracker.db snapshot" 2>/dev/null || true
+          gh release upload db-latest market_tracker.db.gz -R loganmount1/str-tracker-data --clobber
+          echo "Uploaded market_tracker.db.gz to db-latest release."
 
       # ──────────────────────────────────────────────────────────────────
       # Publish the market dashboard to GitHub Pages (replaces the Mac refresh).
