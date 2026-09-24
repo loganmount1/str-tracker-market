@@ -197,6 +197,15 @@ jobs:
           # GUARD: refuse to upload a DB that shrank sharply versus what we restored.
           # Normal days only grow; a big drop means the history went missing. On
           # 2026-09-18 a fresh ~1 MB DB replaced a ~1 GB one and nothing stopped it.
+          # A normal ~1 GB upload takes ~30s; on 2026-09-17 one hung ~2h then died with
+          # HTTP 502. Cap each attempt at 15 min and retry, rather than lose the day.
+          upload() {
+            for attempt in 1 2 3; do
+              timeout 900 gh release upload "$1" "$2" -R loganmount1/str-tracker-data --clobber && return 0
+              echo "::warning::upload of $2 to $1 failed (attempt $attempt)"; sleep 30
+            done
+            return 1
+          }
           NEW_BYTES=$(stat -c %s market_tracker.db.gz)
           echo "Restored ${RESTORED_GZ_BYTES:-0} bytes gz -> saving ${NEW_BYTES} bytes gz"
           if [ "${RESTORED_GZ_BYTES:-0}" -gt 0 ] && [ "$NEW_BYTES" -lt $(( RESTORED_GZ_BYTES * 8 / 10 )) ]; then
@@ -220,7 +229,7 @@ jobs:
           # local file; the `file#label` syntax only sets a display label, not the
           # name), so copy to a dated filename before uploading.
           cp market_tracker.db.gz "market_tracker_${DATE_TAG}.db.gz"
-          gh release upload db-backups "market_tracker_${DATE_TAG}.db.gz" -R loganmount1/str-tracker-data --clobber
+          upload db-backups "market_tracker_${DATE_TAG}.db.gz"
           echo "Stored dated backup market_tracker_${DATE_TAG}.db.gz"
           # Prune: asset names are YYYY-MM-DD so they sort chronologically. Keep
           # the 7 newest, delete the rest.
@@ -232,7 +241,7 @@ jobs:
           # Now replace db-latest (the dated backup above is the safety net if this fails).
           gh release create db-latest -R loganmount1/str-tracker-data \
             -t "Market DB (latest)" -n "Rolling market_tracker.db snapshot" 2>/dev/null || true
-          gh release upload db-latest market_tracker.db.gz -R loganmount1/str-tracker-data --clobber
+          upload db-latest market_tracker.db.gz
           echo "Uploaded market_tracker.db.gz to db-latest release."
 
       # ──────────────────────────────────────────────────────────────────
