@@ -172,6 +172,24 @@ jobs:
         continue-on-error: true
         timeout-minutes: 20
 
+      - name: Measure today's Airbnb coverage
+        run: |
+          python - <<'PY'
+          import sqlite3, os
+          from datetime import date
+          db = sqlite3.connect("market/market_tracker.db")
+          t = date.today().isoformat()
+          active = db.execute("SELECT COUNT(*) FROM properties WHERE active=1 AND platform='airbnb'").fetchone()[0]
+          fresh = db.execute("""SELECT COUNT(DISTINCT c.property_id) FROM calendar_snapshots c
+                                JOIN properties p ON p.id = c.property_id
+                                WHERE c.snapshot_date = ? AND p.platform = 'airbnb'""", (t,)).fetchone()[0]
+          pct = round(100 * fresh / active) if active else 0
+          print(f"Airbnb homes collected today: {fresh}/{active} ({pct}%)")
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"AIRBNB_FRESH={fresh}\nAIRBNB_ACTIVE={active}\nAIRBNB_PCT={pct}\n")
+          PY
+        continue-on-error: true
+
       # ──────────────────────────────────────────────────────────────────
       # Save the updated database back to the PRIVATE data repo as a release
       # asset (gzipped). --clobber overwrites the previous day's asset.
@@ -269,6 +287,18 @@ jobs:
       - name: Deploy to GitHub Pages
         id: pages_deploy
         uses: actions/deploy-pages@v4
+
+      # Fail LOUDLY (red run + GitHub email) when Airbnb collection was thin. From
+      # ~2026-09-23 Airbnb blocked this scraper and every run collected 0 Airbnb homes
+      # while staying green, so nobody noticed for two weeks.
+      - name: Fail if under 70% of Airbnb homes were collected today
+        if: ${{ !cancelled() }}
+        run: |
+          echo "Airbnb coverage today: ${AIRBNB_FRESH:-?}/${AIRBNB_ACTIVE:-?} (${AIRBNB_PCT:-0}%)"
+          if [ "${AIRBNB_PCT:-0}" -lt 70 ]; then
+            echo "::error::Only ${AIRBNB_PCT:-0}% of Airbnb homes were collected today. The Airbnb numbers on the dashboard are stale."
+            exit 1
+          fi
 
       # ──────────────────────────────────────────────────────────────────
       # OPTIONAL: sync aggregated market data to Supabase.

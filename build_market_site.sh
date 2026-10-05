@@ -30,6 +30,8 @@ $PYTHON generate_report.py --db "$DB" 2>&1 | grep -E "Report generated|using lat
 echo "[site] assembling _site/ ..."
 rm -rf _site && mkdir -p _site
 cp market/report.html _site/index.html
+# Per-home trend history is loaded on demand by the page (keeps index.html phone-sized).
+[ -f market/prop_trend.json ] && cp market/prop_trend.json _site/prop_trend.json
 [ -d market/reports ] && cp -r market/reports _site/reports
 # dates.json manifest (drives the date dropdown; report derives its own base path)
 $PYTHON -c "

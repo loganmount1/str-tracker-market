@@ -66,6 +66,29 @@ else:
             print(f"No data for today, using latest available: {today.isoformat()}")
     _db_check.close()
 
+# Airbnb freshness: what share of active Airbnb homes were collected on the report
+# date. From 2026-09-23 Airbnb blocked the cloud scraper and the dashboard kept
+# showing "Data collected <date>" because Vacasa alone cleared the 20-home bar above.
+_stale_banner = ""
+if _is_market:
+    try:
+        _fc = sqlite3.connect(DB_PATH)
+        _active_ab = _fc.execute("SELECT COUNT(*) FROM properties WHERE active=1 AND platform='airbnb'").fetchone()[0]
+        _per_day = dict(_fc.execute("""SELECT r.snapshot_date, COUNT(*) FROM review_snapshots r
+                                       JOIN properties p ON p.id = r.property_id AND p.platform = 'airbnb'
+                                       WHERE r.snapshot_date >= date(?, '-60 days') AND r.snapshot_date <= ?
+                                       GROUP BY r.snapshot_date""", (today.isoformat(), today.isoformat())).fetchall())
+        _fc.close()
+        _fresh_ab = _per_day.get(today.isoformat(), 0)
+        if _active_ab and _fresh_ab < 0.7 * _active_ab:
+            _full = sorted(d for d, n in _per_day.items() if n >= 0.7 * _active_ab)
+            _last_full = date.fromisoformat(_full[-1]).strftime("%b %d") if _full else "over 60 days ago"
+            _stale_banner = (f'<div style="background:#7f1d1d;color:#fff;padding:12px 16px;border-radius:8px;margin:12px 0;font-weight:600;">'
+                             f'Airbnb data is incomplete for this date: {_fresh_ab} of {_active_ab} Airbnb homes were collected. '
+                             f'The rest show their last good numbers. Last full Airbnb day: {_last_full}.</div>')
+    except Exception as _e:
+        print(f"freshness check skipped: {_e}")
+
 # Archive previous report before overwriting (only during normal runs, not --date overrides)
 _explicit_date = bool(_args.date)
 if not _explicit_date and os.path.exists(report_path):
@@ -75,6 +98,9 @@ if not _explicit_date and os.path.exists(report_path):
         archive_dir = f"data/reports/{today.isoformat()}"
     os.makedirs(archive_dir, exist_ok=True)
     shutil.copy2(report_path, os.path.join(archive_dir, "report.html"))
+    _pt_prev = os.path.join(os.path.dirname(report_path) or ".", "prop_trend.json")
+    if os.path.exists(_pt_prev):
+        shutil.copy2(_pt_prev, os.path.join(archive_dir, "prop_trend.json"))
     if os.path.exists(csv_path):
         shutil.copy2(csv_path, os.path.join(archive_dir, "property_report.csv"))
     print(f"Archived previous report to {archive_dir}")
@@ -845,6 +871,7 @@ th.sort-desc::after {{ content: " \\25BC"; font-size: 9px; }}
 <div class="container">
 <h1>{_report_title}</h1>
 <p class="subtitle">Competitive analysis across {total} properties | Data collected {today.strftime("%B %d, %Y")} | {len(with_data)} with metrics | {len(with_pricing)} with pricing</p>
+{_stale_banner}
 <p class="subtitle" style="color: #9ca3af; font-size: 11px; margin-top: 4px;">Note: Occupancy = calendar unavailability. Airbnb does not distinguish guest bookings from owner blocks, so occupancy may be inflated for some properties. ADR is based on sampled available-date pricing and may not reflect actual booked rates.</p>
 
 <div class="date-nav">
@@ -1383,7 +1410,7 @@ else:
     # Embed data as JSON for Chart.js
     # Build per-client-property trend lookup
     client_prop_trends = {pid: prop_trend[pid] for pid in client_ids if pid in prop_trend}
-    html += f'<script>const marketTrend={_json.dumps(market_trend)};const propTrend={_json.dumps(prop_trend)};const marketColors={_json.dumps(market_colors)};const simplyTrend={_json.dumps(simply_trend_points)};const clientIds={_json.dumps(list(client_ids))};const clientPropTrends={_json.dumps(client_prop_trends)};const fullCal={_json.dumps(full_cal_json)};const calStart="{_cal_start.isoformat()}";const calDays={_cal_total_days};const reportDate="{today.isoformat()}";</script>\n'
+    html += f'<script>const marketTrend={_json.dumps(market_trend)};let propTrend={{}};const loadPropTrend=(()=>{{let p=null;return()=>p||(p=fetch("prop_trend.json").then(r=>r.json()).then(d=>(propTrend=d)).catch(()=>propTrend));}})();const marketColors={_json.dumps(market_colors)};const simplyTrend={_json.dumps(simply_trend_points)};const clientIds={_json.dumps(list(client_ids))};const clientPropTrends={_json.dumps(client_prop_trends)};const fullCal={_json.dumps(full_cal_json)};const calStart="{_cal_start.isoformat()}";const calDays={_cal_total_days};const reportDate="{today.isoformat()}";</script>\n'
     html += '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>\n'
 
     # Simply VRM Portfolio section
@@ -1969,14 +1996,14 @@ function renderSimplyCharts(comparePid) {
 
 const simplyCompare = document.getElementById("simplyCompare");
 if (simplyCompare) {
-  simplyCompare.addEventListener("change", () => renderSimplyCharts(simplyCompare.value || null));
+  simplyCompare.addEventListener("change", () => loadPropTrend().then(() => renderSimplyCharts(simplyCompare.value || null)));
 }
 renderSimplyCharts(null);
 
 // Compare dropdown
 const compareSelect = document.getElementById("compareSelect");
 if (compareSelect) {
-  compareSelect.addEventListener("change", () => renderMarketCharts(compareSelect.value || null));
+  compareSelect.addEventListener("change", () => loadPropTrend().then(() => renderMarketCharts(compareSelect.value || null)));
 }
 renderMarketCharts(null);
 
@@ -2039,8 +2066,9 @@ function renderPropChart(pid) {
 // Init property chart with first property
 const propSelect = document.getElementById("propSelect");
 if (propSelect) {
-  propSelect.addEventListener("change", () => renderPropChart(propSelect.value));
-  renderPropChart(propSelect.value);
+  propSelect.addEventListener("change", () => loadPropTrend().then(() => renderPropChart(propSelect.value)));
+  // Per-home history (several MB) loads after the page is up, so phones can render first.
+  setTimeout(() => loadPropTrend().then(() => renderPropChart(propSelect.value)), 1500);
 }
 '''
 
@@ -2054,6 +2082,8 @@ html += '''
 if not _explicit_date:
     with open(report_path, "w") as f:
         f.write(html)
+    with open(os.path.join(os.path.dirname(report_path) or ".", "prop_trend.json"), "w") as f:
+        _json.dump(prop_trend, f, separators=(",", ":"))
 
 # Also update CSV
 with open(csv_path, "w", newline="") as f:
@@ -2092,6 +2122,8 @@ else:
 os.makedirs(archive_dir, exist_ok=True)
 with open(os.path.join(archive_dir, "report.html"), "w") as f:
     f.write(html)
+with open(os.path.join(archive_dir, "prop_trend.json"), "w") as f:
+    _json.dump(prop_trend, f, separators=(",", ":"))
 if not _explicit_date:
     shutil.copy2(csv_path, os.path.join(archive_dir, "property_report.csv"))
 
