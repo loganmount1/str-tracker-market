@@ -27,6 +27,10 @@ permissions:
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    env:
+      # Optional full HTTP proxy URL, e.g. a DataImpulse gateway URL. When the
+      # secret is absent, the collector connects directly as before.
+      AIRBNB_PROXY_URL: ${{ secrets.AIRBNB_PROXY_URL }}
     # Never let two runs overlap: both would restore db-latest, both would scrape,
     # and whichever uploaded LAST would silently erase the other's day of data.
     # A manual dispatch that lands during the scheduled run now waits its turn.

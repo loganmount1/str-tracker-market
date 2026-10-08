@@ -3,6 +3,7 @@
 import time
 import random
 import logging
+import os
 from collections import defaultdict
 
 import requests
@@ -100,4 +101,11 @@ def create_session() -> requests.Session:
         "DNT": "1",
         "Connection": "keep-alive",
     })
+    # Keep proxying opt-in and scoped to callers that use this session. The
+    # workflow sets AIRBNB_PROXY_URL only when a proxy credential is configured,
+    # so database and GitHub traffic stays on the runner's normal connection.
+    proxy_url = os.getenv("AIRBNB_PROXY_URL", "").strip()
+    if proxy_url:
+        session.proxies.update({"http": proxy_url, "https": proxy_url})
+        logger.info("Using configured Airbnb proxy")
     return session
