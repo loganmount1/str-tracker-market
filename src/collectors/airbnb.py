@@ -16,8 +16,13 @@ logger = logging.getLogger(__name__)
 # Public client-side API key used by Airbnb's own web client.
 # Find the current key via browser DevTools on any Airbnb page.
 AIRBNB_API_KEY = "d306zoyjsyarp7ifhu67rjxn52tv0t20"
-AIRBNB_API_V2 = "https://www.airbnb.com/api/v2"
 AIRBNB_API_V3 = "https://www.airbnb.com/api/v3"
+
+# Airbnb retired the old homes_pdp_availability_calendar response used by the
+# v2 collector.  The public web client now uses this persisted GraphQL query.
+# Keep the hash here with the endpoint so calendar collection does not depend on
+# the pricing query's independently changing hash.
+AIRBNB_CALENDAR_HASH = "8f08e03c7bd16fcad3c92a3592c19a8b559a0d0855a84028d1163d4733ed9ade"
 
 
 class AirbnbCollector(BaseCollector):
@@ -36,7 +41,7 @@ class AirbnbCollector(BaseCollector):
         raise ValueError(f"Cannot extract Airbnb listing ID from: {url}")
 
     def collect_calendar(self, property_id: str, months: int = 12) -> list[CalendarDay]:
-        """Fetch calendar availability via /api/v2/homes_pdp_availability_calendar.
+        """Fetch calendar availability via Airbnb's persisted GraphQL query.
 
         Returns day-by-day availability for up to 12 months.
         Note: Pricing data is not available from this endpoint.
@@ -44,28 +49,49 @@ class AirbnbCollector(BaseCollector):
         self.rate_limiter.wait("airbnb.com")
 
         now = datetime.now()
+        variables = {
+            "request": {
+                "count": months,
+                "listingId": property_id,
+                "month": now.month,
+                "year": now.year,
+            }
+        }
         params = {
-            "key": AIRBNB_API_KEY,
-            "listing_id": property_id,
-            "month": now.month,
-            "year": now.year,
-            "count": months,
+            "operationName": "PdpAvailabilityCalendar",
+            "locale": "en",
             "currency": "USD",
+            "variables": json.dumps(variables, separators=(",", ":")),
+            "extensions": json.dumps({
+                "persistedQuery": {
+                    "version": 1,
+                    "sha256Hash": AIRBNB_CALENDAR_HASH,
+                }
+            }, separators=(",", ":")),
         }
 
         logger.debug(f"Fetching calendar for Airbnb listing {property_id}")
         response = make_request(
             self.session, "GET",
-            f"{AIRBNB_API_V2}/homes_pdp_availability_calendar",
+            f"{AIRBNB_API_V3}/PdpAvailabilityCalendar/{AIRBNB_CALENDAR_HASH}/",
             params=params,
-            headers={"X-Airbnb-Api-Key": AIRBNB_API_KEY},
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "X-Airbnb-Api-Key": AIRBNB_API_KEY,
+            },
         )
         data = response.json()
 
-        calendar_months = data.get("calendar_months", [])
+        calendar_months = (
+            data.get("data", {})
+            .get("merlin", {})
+            .get("pdpAvailabilityCalendar", {})
+            .get("calendarMonths", [])
+        )
         if not calendar_months:
             raise StructureChangedError(
-                "No 'calendar_months' in Airbnb calendar response"
+                "No 'data.merlin.pdpAvailabilityCalendar.calendarMonths' in Airbnb response"
             )
 
         days = []
@@ -85,13 +111,15 @@ class AirbnbCollector(BaseCollector):
                 # bookable=False means gap nights that can't be reserved due to
                 # min-night requirements between existing bookings.
                 is_available = day_data.get("available", False)
-                is_bookable = day_data.get("bookable", True)
+                # The current endpoint returns null for bookable on ordinary
+                # calendar days. Only an explicit False means unbookable.
+                is_bookable = day_data.get("bookable") is not False
 
                 days.append(CalendarDay(
-                    date=day_data["date"],
+                    date=day_data.get("calendarDate", day_data.get("date")),
                     available=is_available and is_bookable,
                     price=float(price) if price else None,
-                    min_nights=day_data.get("min_nights"),
+                    min_nights=day_data.get("minNights", day_data.get("min_nights")),
                 ))
 
         return days
