@@ -97,7 +97,9 @@ def create_session() -> requests.Session:
             "Chrome/120.0.0.0 Safari/537.36"
         ),
         "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
+        # Keep Requests' default Accept-Encoding: it advertises only decoders
+        # installed in this environment. Forcing `br` without Brotli installed
+        # made Airbnb return compressed bytes that response.json() could not read.
         "DNT": "1",
         "Connection": "keep-alive",
     })
