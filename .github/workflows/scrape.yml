@@ -7,6 +7,10 @@ name: Mt Hood Market Scrape
 on:
   workflow_dispatch:
     inputs:
+      airbnb_only:
+        description: "Skip Vacasa to prioritize an Airbnb recovery run"
+        type: boolean
+        default: false
       run_discovery:
         description: "Force a discovery pass on this manual run"
         type: boolean
@@ -57,6 +61,9 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Test HTTP response decoding
+        run: python -m unittest discover -s tests -v
 
       # ──────────────────────────────────────────────────────────────────
       # Restore the database from the PRIVATE data repo.
@@ -167,6 +174,7 @@ jobs:
       # used to wedge for 25+ hours on connection-reset storms and silently eat the
       # next day's run. Now it stops cleanly and the leftovers wait for tomorrow.
       - name: Collect Vacasa calendars + pricing (direct scrape)
+        if: ${{ github.event.inputs.airbnb_only != 'true' }}
         run: python market/collect_vacasa.py --max-minutes 110
         continue-on-error: true
         timeout-minutes: 120
